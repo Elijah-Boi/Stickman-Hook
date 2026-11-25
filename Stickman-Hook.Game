@@ -1,0 +1,898 @@
+(() => {
+  document.getElementById("hook-game")?.remove();
+
+  const game = document.createElement("div");
+  game.id = "hook-game";
+  game.style.cssText =
+    "position:fixed;inset:0;z-index:2147483647;overflow:hidden;background:#101827;color:white;font:14px system-ui";
+
+  const style = document.createElement("style");
+  style.textContent = `
+    #hook-game *{box-sizing:border-box}
+    #hook-game canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none}
+    #hook-game button,#hook-game select{padding:8px 11px;color:white;background:#26364b;border:1px solid #ffffff35;border-radius:9px;cursor:pointer;font:inherit}
+    #hook-game button:hover{background:#38516d}
+    #hook-game button:disabled{opacity:.5;cursor:default}
+    #hook-game .screen{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;background:linear-gradient(180deg,#07111b55,#07111bcc)}
+    #hook-game .screen[hidden],#hook-game [hidden]{display:none!important}
+    #hook-game .card{width:min(580px,96vw);max-height:92vh;overflow:auto;padding:22px;border:1px solid #8ee8ff66;border-radius:22px;background:linear-gradient(145deg,#111c2df2,#1f354ef0);box-shadow:0 18px 70px #0009;backdrop-filter:blur(12px)}
+    #hook-game h1{margin:0;color:#8ee8ff;font-size:clamp(28px,6vw,48px);text-align:center;text-shadow:0 0 18px #55d6ff99;animation:hookGlow 2s ease-in-out infinite alternate}
+    #hook-game .row{display:flex;justify-content:center;align-items:center;flex-wrap:wrap;gap:8px;margin:12px 0}
+    #hook-game .badge{padding:5px 9px;border-radius:999px;background:#ffffff12;border:1px solid #ffffff12}
+    #hook-game .preview{display:flex;align-items:center;justify-content:center;gap:12px;min-height:75px;margin:8px auto;padding:10px;border-radius:14px;background:#ffffff09}
+    #hook-game .avatarDot{width:34px;height:34px;border-radius:50%;box-shadow:0 0 22px currentColor;animation:hookBob 1.4s ease-in-out infinite}
+    #hook-game .primary{background:#167c92!important;border-color:#8ee8ff99!important;font-weight:800}
+    #hook-game #controls{position:absolute;top:12px;left:12px;display:flex;gap:7px;flex-wrap:wrap;max-width:calc(100vw - 70px)}
+    #hook-game #exit{position:absolute;right:12px;top:12px;font-size:21px}
+    #hook-game .modal{position:absolute;z-index:5;inset:0;display:flex;align-items:center;justify-content:center;padding:15px;background:#06101dcc}
+    #hook-game .modalCard{width:min(500px,96vw);max-height:85vh;overflow:auto;padding:16px;border:1px solid #8ee8ff66;border-radius:16px;background:#101827f5}
+    #hook-game .item{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 3px;border-bottom:1px solid #ffffff20}
+    #hook-game #notice{position:absolute;z-index:6;left:50%;top:22%;transform:translateX(-50%);padding:10px 16px;border-radius:12px;background:#17243bef;color:white;font-weight:bold;font-size:18px;text-align:center;pointer-events:none;opacity:0;transition:opacity .2s}
+    #hook-game #notice.show{opacity:1}
+    @keyframes hookGlow{to{text-shadow:0 0 28px #55d6ffdd,0 0 45px #55d6ff66}}
+    @keyframes hookBob{50%{transform:translateY(-7px) scale(1.05)}}
+  `;
+  game.appendChild(style);
+
+  const canvas = document.createElement("canvas");
+  game.appendChild(canvas);
+  const ctx = canvas.getContext("2d");
+
+  function make(tag, parent, text, className) {
+    const node = document.createElement(tag);
+    if (text !== undefined) node.textContent = text;
+    if (className) node.className = className;
+    parent.appendChild(node);
+    return node;
+  }
+
+  const titleScreen = make("div", game, undefined, "screen");
+  const card = make("div", titleScreen, undefined, "card");
+  make("h1", card, "🪝 Stickman Hook");
+  const subtitle = make("p", card, "Swing, dash, collect coins, and reach the finish.");
+  subtitle.style.textAlign = "center";
+
+  const hud = make("div", card, undefined, "row");
+  const levelHud = make("span", hud, "", "badge");
+  const coinHud = make("span", hud, "", "badge");
+  const redHud = make("span", hud, "", "badge");
+  const badgeHud = make("span", hud, "", "badge");
+
+  const preview = make("div", card, undefined, "preview");
+  const avatarDot = make("div", preview, undefined, "avatarDot");
+  const avatarText = make("span", preview, "");
+
+  const playRow = make("div", card, undefined, "row");
+  const levelSelect = make("select", playRow);
+  const playButton = make("button", playRow, "▶ Play", "primary");
+
+  const menuRow = make("div", card, undefined, "row");
+  const avatarStoreButton = make("button", menuRow, "🛍 Avatars");
+  const powerStoreButton = make("button", menuRow, "🔋 Powers");
+  const badgesButton = make("button", menuRow, "🏅 Badges");
+
+  const directions = make("p", card,
+    "Hold Space or hold click/touch to swing · D to dash · E for avatar ability");
+  directions.style.textAlign = "center";
+
+  const controls = make("div", game);
+  controls.id = "controls";
+  controls.hidden = true;
+  const returnButton = make("button", controls, "↩ RETURN TO TITLE SCREEN");
+  const dashButton = make("button", controls, "⚡ Dash (D)");
+  const abilityButton = make("button", controls, "✨ Ability (E)");
+
+  const exitButton = make("button", game, "×");
+  exitButton.id = "exit";
+  exitButton.title = "Close game";
+
+  const notice = make("div", game, "");
+  notice.id = "notice";
+
+  const modal = make("div", game, undefined, "modal");
+  modal.hidden = true;
+  const modalCard = make("div", modal, undefined, "modalCard");
+  const modalTitle = make("h2", modalCard, "");
+  const modalBalance = make("p", modalCard, "");
+  const modalItems = make("div", modalCard);
+  const closeModal = make("button", modalCard, "Close");
+
+  document.body.appendChild(game);
+
+  const names = [
+    "Sky","Cherry","Gold","Violet","Mint","Tiger","Classic","Candy","Lime","Comet",
+    "Flame","Ocean","Rose","Galaxy","Neon","Rainbow","Frost","Shadow","Star","Champion"
+  ];
+  const colors = [
+    "#55d6ff","#ff718e","#ffe06a","#9d8aff","#69e6a6",
+    "#ff9d55","#f5f5f5","#ff65dd","#b8ee4f","#72a1ff",
+    "#ff5733","#22c8b8","#ff94c2","#bf72ff","#b4ff38",
+    "#ffdf5d","#a9f3ff","#b3b8c5","#fff4a3","#ff3f73"
+  ];
+  const avatarData = [
+    ["Wings","Sky Glide","glide",7],["Petals","Petal Bounce","jump",0],
+    ["Halo","Gold Magnet","magnet",8],["Orbit rings","Violet Blink","blink",0],
+    ["Leaves","Mint Spring","jump",0],["Stripes","Tiger Pounce","pounce",0],
+    ["Star trail","Super Jump","jump",0],["Candy ring","Candy Float","float",6],
+    ["Spring aura","Lime Launch","launch",0],["Comet tail","Comet Boost","boost",0],
+    ["Fire wings","Fire Flight","flight",15],["Bubbles","Bubble Shield","shield",8],
+    ["Rose petals","Rose Float","float",8],["Galaxy stars","Gravity Flip","flip",0],
+    ["Neon ring","Neon Dash","boost",0],["Rainbow rings","Rainbow Rush","boost",0],
+    ["Snowflakes","Frost Slide","frost",6],["Shadow aura","Shadow Phase","phase",5],
+    ["Star crown","Star Hop","jump",0],["Champion crown","Champion Charge","boost",0]
+  ];
+  const badges = [
+    ["secret","Secret Finder","Find a secret area"],
+    ["coins","Coin Collector","Collect 50 coins"],
+    ["rare","Rare Hunter","Collect 5 red coins"],
+    ["level10","Rising Swinger","Unlock level 10"]
+  ];
+
+  function readNumber(key, fallback) {
+    try { return Number(localStorage.getItem(key)) || fallback; }
+    catch (_) { return fallback; }
+  }
+  function readJSON(key, fallback) {
+    try {
+      const value = JSON.parse(localStorage.getItem(key) || "null");
+      return value == null ? fallback : value;
+    } catch (_) { return fallback; }
+  }
+  function save(key, value) {
+    try { localStorage.setItem(key, String(value)); } catch (_) {}
+  }
+
+  let unlocked = Math.max(1, Math.min(100, readNumber("hookLevel", 1)));
+  let level = unlocked;
+  let coins = readNumber("hookCoins", 0);
+  let redCoins = readNumber("hookRedCoins", 0);
+  let totalCoins = readNumber("hookTotalCoins", 0);
+  let totalRed = readNumber("hookTotalRed", 0);
+  let secretsFound = readNumber("hookSecrets", 0);
+  let skin = Math.max(0, Math.min(names.length - 1, readNumber("hookSkin", 0)));
+  let owned = readJSON("hookOwned", [true]);
+  if (!Array.isArray(owned)) owned = [true];
+  owned.length = names.length;
+  owned[0] = true;
+  if (!owned[skin]) skin = 0;
+
+  let powers = readJSON("hookPowers", {dash:0,recharge:0,magnet:0});
+  powers = {...{dash:0,recharge:0,magnet:0},...powers};
+  let earned = readJSON("hookBadges", []);
+  if (!Array.isArray(earned)) earned = [];
+
+  let mode = "title";
+  let W = 0, H = 0, world = 0;
+  let player = null;
+  let hooks = [], pads = [], pickups = [];
+  let secret = null;
+  let camera = 0;
+  let dashCharge = 1, abilityCharge = 1, abilityTime = 0, abilityKind = "";
+  let swingHeld = false, spaceDown = false, running = true;
+  let raf = 0, noticeTimer = 0, lastTime = performance.now(), anim = 0;
+
+  function persist() {
+    save("hookLevel", unlocked);
+    save("hookCoins", coins);
+    save("hookRedCoins", redCoins);
+    save("hookTotalCoins", totalCoins);
+    save("hookTotalRed", totalRed);
+    save("hookSecrets", secretsFound);
+    save("hookSkin", skin);
+    save("hookOwned", JSON.stringify(owned));
+    save("hookPowers", JSON.stringify(powers));
+    save("hookBadges", JSON.stringify(earned));
+  }
+
+  function showNotice(text) {
+    notice.textContent = text;
+    notice.classList.add("show");
+    clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => notice.classList.remove("show"), 1400);
+  }
+
+  function award(id, label) {
+    if (earned.includes(id)) return;
+    earned.push(id);
+    persist();
+    showNotice("🏅 Badge earned: " + label);
+  }
+
+  function checkBadges() {
+    if (secretsFound >= 1) award("secret", "Secret Finder");
+    if (totalCoins >= 50) award("coins", "Coin Collector");
+    if (totalRed >= 5) award("rare", "Rare Hunter");
+    if (unlocked >= 10) award("level10", "Rising Swinger");
+  }
+
+  function updateTitle() {
+    levelHud.textContent = "Unlocked through level " + unlocked;
+    coinHud.textContent = "🪙 " + coins;
+    redHud.textContent = "🔴 " + redCoins;
+    badgeHud.textContent = "🏅 " + earned.length + "/" + badges.length;
+    avatarDot.style.background = colors[skin];
+    avatarDot.style.color = colors[skin];
+    avatarText.textContent = names[skin] + " · " + avatarData[skin][0] + " · " + avatarData[skin][1];
+
+    levelSelect.replaceChildren();
+    for (let i = 1; i <= unlocked; i++) {
+      const option = document.createElement("option");
+      option.value = String(i);
+      option.textContent = "Level " + i;
+      levelSelect.appendChild(option);
+    }
+    level = Math.min(level, unlocked);
+    levelSelect.value = String(level);
+    playButton.textContent = "▶ Play Level " + level;
+  }
+
+  function updateControls() {
+    dashButton.textContent = dashCharge >= 1 ? "⚡ Dash (D)" : "⚡ Charging";
+    dashButton.disabled = dashCharge < 1;
+    abilityButton.textContent = abilityTime > 0
+      ? "✨ " + avatarData[skin][1] + " " + Math.ceil(abilityTime) + "s"
+      : abilityCharge >= 1 ? "✨ " + avatarData[skin][1] + " (E)" : "✨ Charging";
+    abilityButton.disabled = abilityCharge < 1;
+  }
+
+  function seeded(seed) {
+    let n = seed >>> 0;
+    return () => {
+      n = (n * 1664525 + 1013904223) >>> 0;
+      return n / 4294967296;
+    };
+  }
+
+  function buildLevel() {
+    const random = seeded(level * 7919 + 17);
+    const pattern = level % 5;
+    world = Math.max(2200, W * 2.8);
+    hooks = [];
+    pads = [];
+    pickups = [];
+
+    hooks.push({x:230,y:H * .4});
+    for (let x = 490, i = 0; x < world - 250; i++, x += 230 + random() * 90) {
+      let y;
+      if (pattern === 0) y = H * (.25 + random() * .35);
+      else if (pattern === 1) y = H * (i % 2 ? .3 : .52);
+      else if (pattern === 2) y = H * (.42 + Math.sin(i) * .17);
+      else if (pattern === 3) y = H * (.2 + random() * .22);
+      else y = H * (.45 + random() * .18);
+
+      hooks.push({x,y:Math.max(H * .18,Math.min(H * .68,y))});
+
+      if (random() < .42) {
+        pads.push({
+          x:x - 55,y:H * (.66 + random() * .16),
+          width:100 + random() * 65,bounce:8 + random() * 3,squash:0
+        });
+      }
+    }
+
+    secret = {x:world * (.55 + random() * .15),y:H * .13,found:false};
+
+    if (level % 4 === 0 || level % 5 === 0) {
+      pads.push({wall:true,x:world * .58,y:H * .38,width:22,height:H * .5,flash:0});
+    }
+
+    for (let x = 360; x < world - 120; x += 290) {
+      pickups.push({x,y:H * (.3 + random() * .4),type:"coin",collected:false});
+    }
+    pickups.push({x:world * .64,y:H * .4,type:"red",collected:false});
+    for (let x = 700; x < world - 150; x += 700) {
+      pickups.push({x,y:H * .35,type:"orb",collected:false});
+    }
+
+    player = {x:90,y:H * .56,vx:4,vy:0,hook:-1,rope:0,grounded:false,dashFrames:0,shield:0};
+    camera = 0;
+    dashCharge = 1;
+    abilityCharge = 1;
+    abilityTime = 0;
+    swingHeld = false;
+  }
+
+  function startGame() {
+    level = Math.max(1,Math.min(unlocked,Number(levelSelect.value) || 1));
+    mode = "game";
+    titleScreen.hidden = true;
+    controls.hidden = false;
+    modal.hidden = true;
+    buildLevel();
+    subtitle.textContent = "Swing through the course and touch the finish flag.";
+    showNotice("Level " + level);
+  }
+
+  function returnToTitle(message) {
+    mode = "title";
+    swingHeld = false;
+    if (player) player.hook = -1;
+    controls.hidden = true;
+    titleScreen.hidden = false;
+    modal.hidden = true;
+    if (message) subtitle.textContent = message;
+    updateTitle();
+  }
+
+  function nearestHook() {
+    let result = -1, nearest = 360;
+    hooks.forEach((hook,i) => {
+      const d = Math.hypot(hook.x - player.x,hook.y - player.y);
+      if (d < nearest) {
+        nearest = d;
+        result = i;
+      }
+    });
+    return result;
+  }
+
+  function beginSwing() {
+    if (mode !== "game" || !player || !modal.hidden) return;
+    swingHeld = true;
+    if (player.hook !== -1) return;
+    const i = nearestHook();
+    if (i !== -1) {
+      player.hook = i;
+      player.rope = Math.max(65,Math.hypot(
+        hooks[i].x - player.x,
+        hooks[i].y - player.y
+      ));
+    }
+  }
+
+  function releaseSwing() {
+    swingHeld = false;
+    if (player) player.hook = -1;
+  }
+
+  function useDash() {
+    if (mode !== "game" || !player || dashCharge < 1) return;
+    dashCharge = 0;
+    player.hook = -1;
+    player.dashFrames = 14;
+    player.vx += 10 + (Number(powers.dash) || 0) * 2;
+    player.vy *= .6;
+  }
+
+  function useAbility() {
+    if (mode !== "game" || !player || abilityCharge < 1) return;
+    const kind = avatarData[skin][2];
+    abilityKind = kind;
+    abilityCharge = 0;
+    abilityTime = avatarData[skin][3] || 0;
+
+    if (kind === "jump" || kind === "launch" || kind === "pounce") {
+      player.vy = kind === "jump" ? -14 : -11;
+      player.hook = -1;
+    } else if (kind === "boost") {
+      player.vx += 14;
+      player.hook = -1;
+      player.dashFrames = 14;
+    } else if (kind === "blink") {
+      player.x += 150;
+    } else if (kind === "flip") {
+      player.vy = -player.vy;
+    } else if (kind === "flight") {
+      player.hook = -1;
+      player.vy = -3;
+      player.vx = Math.max(player.vx,8);
+    } else if (kind === "shield") {
+      player.shield = 8;
+    }
+
+    showNotice(avatarData[skin][1] + "!");
+  }
+
+  function drawPlayer() {
+    if (!player) return;
+    const x = player.x, y = player.y;
+    const color = colors[skin];
+    const swinging = player.hook !== -1 && swingHeld;
+
+    if (swinging) {
+      const hook = hooks[player.hook];
+      const dx = hook.x - x, dy = hook.y - y;
+      const len = Math.hypot(dx,dy) || 1;
+      const handX = x + dx / len * 16;
+      const handY = y - 4 + dy / len * 16;
+
+      ctx.strokeStyle = "#e9fbff";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(hook.x,hook.y);
+      ctx.lineTo(handX,handY);
+      ctx.stroke();
+
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color;
+      ctx.lineWidth = 5;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.arc(x,y - 15,8,0,Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(x,y - 5);
+      ctx.lineTo(x,y + 15);
+      ctx.moveTo(x,y);
+      ctx.lineTo(handX,handY);
+      ctx.moveTo(x,y + 15);
+      ctx.lineTo(x - 10,y + 29);
+      ctx.moveTo(x,y + 15);
+      ctx.lineTo(x + 10,y + 29);
+      ctx.stroke();
+    } else if (!player.grounded) {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(x,y,17,0,Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#132033";
+      ctx.beginPath();
+      ctx.arc(x - 5,y - 3,2,0,Math.PI * 2);
+      ctx.arc(x + 5,y - 3,2,0,Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color;
+      ctx.lineWidth = 5;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.arc(x,y - 15,8,0,Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(x,y - 5);
+      ctx.lineTo(x,y + 15);
+      ctx.moveTo(x,y);
+      ctx.lineTo(x - 11,y + 8);
+      ctx.moveTo(x,y);
+      ctx.lineTo(x + 11,y + 8);
+      ctx.moveTo(x,y + 15);
+      ctx.lineTo(x - 9,y + 29);
+      ctx.moveTo(x,y + 15);
+      ctx.lineTo(x + 9,y + 29);
+      ctx.stroke();
+    }
+
+    // Fire avatar wings.
+    if (skin === 10) {
+      ctx.fillStyle = "#ff6938";
+      ctx.shadowColor = "#ff532a";
+      ctx.shadowBlur = 12;
+      for (const side of [-1,1]) {
+        ctx.beginPath();
+        ctx.ellipse(x + side * 22,y - 3,13,7 + Math.sin(anim * .2) * 2,side * .2,0,Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.shadowBlur = 0;
+    }
+
+    if (player.shield > 0) {
+      ctx.strokeStyle = "#8ee8ff";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(x,y,29,0,Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
+  function finishLevel() {
+    if (level >= 100) {
+      unlocked = 100;
+      persist();
+      returnToTitle("🎉 You completed all 100 levels!");
+      return;
+    }
+    unlocked = Math.max(unlocked,level + 1);
+    level++;
+    checkBadges();
+    persist();
+    returnToTitle("Level complete! Level " + level + " unlocked.");
+  }
+
+  function frame(now) {
+    if (!running || !game.isConnected) return;
+    const dt = Math.min(2,Math.max(.25,(now - lastTime) / 16.67));
+    lastTime = now;
+    anim += dt;
+
+    if (mode === "game" && player) {
+      if (dashCharge < 1) {
+        dashCharge = Math.min(1,dashCharge + dt / (360 * (1 - (Number(powers.recharge) || 0) * .14)));
+      }
+      if (abilityCharge < 1) abilityCharge = Math.min(1,abilityCharge + dt / 900);
+      if (abilityTime > 0) {
+        abilityTime = Math.max(0,abilityTime - dt / 60);
+        if (abilityKind === "flight") {
+          player.vy = Math.min(player.vy,-1.7);
+          player.vx = Math.max(player.vx,8);
+        } else if (abilityKind === "glide" || abilityKind === "float") {
+          player.vy = Math.min(player.vy,1.1);
+        }
+      }
+
+      if (swingHeld && player.hook === -1) {
+        const target = nearestHook();
+        if (target >= 0) {
+          player.hook = target;
+          player.rope = Math.max(65,Math.hypot(
+            hooks[target].x - player.x,
+            hooks[target].y - player.y
+          ));
+        }
+      }
+
+      const p = player;
+      const oldX = p.x, oldY = p.y;
+      p.grounded = false;
+      const lightGravity = abilityTime > 0 &&
+        ["flight","glide","float"].includes(abilityKind);
+      p.vy += (lightGravity ? .035 : .19) * dt;
+      p.vx *= Math.pow(.999,dt);
+
+      if (p.dashFrames > 0) {
+        p.dashFrames -= dt;
+        p.vx = Math.max(p.vx,11 + (Number(powers.dash) || 0) * 2);
+      }
+
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+
+      pads.forEach(pad => {
+        if (pad.wall) {
+          const overlapY = p.y + 16 > pad.y && p.y - 16 < pad.y + pad.height;
+          const hit = overlapY &&
+            ((oldX + 16 <= pad.x && p.x + 16 >= pad.x) ||
+             (oldX - 16 >= pad.x + pad.width && p.x - 16 <= pad.x + pad.width));
+          if (hit && !(abilityTime > 0 && abilityKind === "phase")) {
+            p.vx = -p.vx * .8;
+            p.x = oldX;
+            pad.flash = 8;
+          }
+          return;
+        }
+
+        pad.squash *= .8;
+        const overlaps = p.x + 12 > pad.x && p.x - 12 < pad.x + pad.width;
+        const topHit = p.vy > 0 && oldY + 17 <= pad.y && p.y + 17 >= pad.y;
+        const bottom = pad.y + 13;
+        const undersideHit = p.vy < 0 && oldY - 17 >= bottom && p.y - 17 <= bottom;
+
+        if (overlaps && (topHit || undersideHit)) {
+          p.y = topHit ? pad.y - 17 : bottom + 17;
+          p.vy = topHit ? -pad.bounce : pad.bounce;
+          p.hook = -1;
+          pad.squash = 1;
+        }
+      });
+
+      const magnet = 30 + (Number(powers.magnet) || 0) * 20 +
+        (abilityTime > 0 && abilityKind === "magnet" ? 100 : 0);
+
+      pickups.forEach(item => {
+        if (item.collected || Math.hypot(item.x - p.x,item.y - p.y) > magnet) return;
+        item.collected = true;
+        if (item.type === "orb") {
+          dashCharge = 1;
+          showNotice("Dash recharged!");
+        } else if (item.type === "red") {
+          redCoins++;
+          totalRed++;
+        } else {
+          coins++;
+          totalCoins++;
+        }
+        checkBadges();
+        persist();
+      });
+
+      if (!secret.found && Math.hypot(p.x - secret.x,p.y - secret.y) < 48) {
+        secret.found = true;
+        secretsFound++;
+        coins += 5;
+        checkBadges();
+        persist();
+        showNotice("Secret found! +5 coins 🏅");
+      }
+
+      if (p.y + 17 >= H * .92) {
+        if (p.shield > 0) {
+          p.shield = 0;
+          p.y = H * .92 - 18;
+          p.vy = -9;
+        } else {
+          buildLevel();
+          showNotice("Ground hit! Try again");
+        }
+      } else {
+        if (p.hook !== -1 && swingHeld) {
+          const hook = hooks[p.hook];
+          const dx = p.x - hook.x, dy = p.y - hook.y;
+          const distance = Math.hypot(dx,dy) || 1;
+          if (distance > p.rope) {
+            const nx = dx / distance, ny = dy / distance;
+            p.x = hook.x + nx * p.rope;
+            p.y = hook.y + ny * p.rope;
+            const radial = p.vx * nx + p.vy * ny;
+            p.vx -= radial * nx;
+            p.vy -= radial * ny;
+          }
+        }
+        if (p.x >= world - 100) finishLevel();
+      }
+
+      updateControls();
+    }
+
+    ctx.clearRect(0,0,W,H);
+    const gradient = ctx.createLinearGradient(0,0,0,H);
+    gradient.addColorStop(0,"#142943");
+    gradient.addColorStop(1,"#101827");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0,0,W,H);
+
+    for (let i = 0; i < 32; i++) {
+      const sx = (i * 173 + Math.sin(anim * .02 + i) * 20) % Math.max(W,1);
+      const sy = (i * 97 + anim * .12) % Math.max(H,1);
+      ctx.fillStyle = "rgba(225,245,255,.55)";
+      ctx.fillRect(sx,sy,2,2);
+    }
+
+    if (mode === "game" && player) {
+      camera = Math.max(0,Math.min(world - W,player.x - W * .38));
+      ctx.save();
+      ctx.translate(-camera,0);
+
+      ctx.fillStyle = "#26364b";
+      ctx.fillRect(0,H * .92,world,H * .08);
+      ctx.fillStyle = "#ff5577";
+      ctx.fillRect(0,H * .92,world,5);
+
+      pads.forEach(pad => {
+        if (pad.wall) {
+          ctx.fillStyle = pad.flash > 0 ? "#fff" : "#b849b7";
+          ctx.fillRect(pad.x,pad.y,pad.width,pad.height);
+          ctx.strokeStyle = "#ff9dd9";
+          ctx.lineWidth = 3;
+          ctx.strokeRect(pad.x,pad.y,pad.width,pad.height);
+        } else {
+          ctx.fillStyle = "#6948b8";
+          ctx.fillRect(pad.x,pad.y + pad.squash * 5,pad.width,13);
+          ctx.fillStyle = "#c29aff";
+          ctx.fillRect(pad.x,pad.y + pad.squash * 5,pad.width,4);
+        }
+      });
+
+      ctx.strokeStyle = secret.found ? "#69e6a6" : "#ffe06a";
+      ctx.lineWidth = 4;
+      ctx.shadowColor = ctx.strokeStyle;
+      ctx.shadowBlur = 14;
+      ctx.beginPath();
+      ctx.ellipse(secret.x,secret.y,22,32,0,0,Math.PI * 2);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      pickups.forEach(item => {
+        if (item.collected) return;
+        const bob = Math.sin(anim * .08 + item.x) * 5;
+        const color = item.type === "red" ? "#ff4545" :
+          item.type === "orb" ? "#43eaff" : "#ffe06a";
+        ctx.fillStyle = color;
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 14;
+        ctx.beginPath();
+        ctx.arc(item.x,item.y + bob,item.type === "red" ? 11 : 9,0,Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        if (item.type === "orb") {
+          ctx.fillStyle = "#fff";
+          ctx.font = "bold 11px system-ui";
+          ctx.textAlign = "center";
+          ctx.fillText("D",item.x,item.y + bob + 4);
+        }
+      });
+
+      const target = player.hook === -1 ? nearestHook() : player.hook;
+      hooks.forEach((hook,i) => {
+        ctx.save();
+        if (i === target) {
+          ctx.strokeStyle = "#d8f8ff";
+          ctx.lineWidth = 3;
+          ctx.shadowColor = "#8ee8ff";
+          ctx.shadowBlur = 14;
+          ctx.beginPath();
+          ctx.arc(hook.x,hook.y,20,0,Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.strokeStyle = i === target ? "#8ee8ff" : "#54788a";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(hook.x,hook.y,10,Math.PI,0);
+        ctx.stroke();
+        ctx.restore();
+      });
+
+      const finish = world - 100;
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(finish,H * .5,5,H * .42);
+      ctx.fillStyle = "#69e6a6";
+      ctx.beginPath();
+      ctx.moveTo(finish + 5,H * .5);
+      ctx.lineTo(finish + 60,H * .53);
+      ctx.lineTo(finish + 5,H * .57);
+      ctx.fill();
+
+      drawPlayer();
+      ctx.restore();
+    } else {
+      const x = W * .5;
+      const y = H * .76 + Math.sin(anim * .06) * 12;
+      ctx.fillStyle = colors[skin];
+      ctx.shadowColor = colors[skin];
+      ctx.shadowBlur = 22;
+      ctx.beginPath();
+      ctx.arc(x,y,20 + Math.sin(anim * .08) * 2,0,Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
+    raf = requestAnimationFrame(frame);
+  }
+
+  function resize() {
+    W = Math.max(1,innerWidth);
+    H = Math.max(1,innerHeight);
+    const dpr = Math.min(devicePixelRatio || 1,2);
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+
+  function onKeyDown(event) {
+    if (event.code === "Space" && mode === "game") {
+      event.preventDefault();
+      if (!spaceDown) {
+        spaceDown = true;
+        beginSwing();
+      }
+    } else if (event.code === "KeyD") {
+      event.preventDefault();
+      useDash();
+    } else if (event.code === "KeyE") {
+      event.preventDefault();
+      useAbility();
+    } else if (event.code === "Escape") {
+      if (!modal.hidden) modal.hidden = true;
+      else if (mode === "game") returnToTitle();
+    }
+  }
+
+  function onKeyUp(event) {
+    if (event.code === "Space") {
+      spaceDown = false;
+      releaseSwing();
+    }
+  }
+
+  function closeGame() {
+    running = false;
+    cancelAnimationFrame(raf);
+    clearTimeout(noticeTimer);
+    removeEventListener("resize",resize);
+    removeEventListener("keydown",onKeyDown);
+    removeEventListener("keyup",onKeyUp);
+    removeEventListener("pointerup",releaseSwing);
+    game.remove();
+  }
+
+  function addStoreItem(label,buttonText,disabled,action,color) {
+    const row = make("div",modalItems,undefined,"item");
+    const text = make("span",row,label);
+    if (color) text.style.color = color;
+    const button = make("button",row,buttonText);
+    button.disabled = disabled;
+    button.onclick = action;
+  }
+
+  function openAvatarStore() {
+    modal.hidden = false;
+    modalTitle.textContent = "🛍 Avatar Store";
+    modalBalance.textContent = "Coins: 🪙 " + coins;
+    modalItems.replaceChildren();
+
+    names.forEach((name,i) => {
+      const price = i === 0 ? 0 : 5 + i * 5;
+      addStoreItem(
+        name + " · " + avatarData[i][0] + " · " + avatarData[i][1],
+        owned[i] ? (skin === i ? "Selected ✓" : "Select") : "Buy · 🪙 " + price,
+        owned[i] ? skin === i : coins < price,
+        () => {
+          if (owned[i]) {
+            skin = i;
+          } else if (coins >= price) {
+            coins -= price;
+            owned[i] = true;
+            skin = i;
+          } else return;
+          persist();
+          updateTitle();
+          openAvatarStore();
+        },
+        colors[i]
+      );
+    });
+  }
+
+  function openPowerStore() {
+    modal.hidden = false;
+    modalTitle.textContent = "🔋 Power Store";
+    modalBalance.textContent = "Red coins: 🔴 " + redCoins;
+    modalItems.replaceChildren();
+
+    [
+      {key:"dash",name:"Dash Strength",cost:2},
+      {key:"recharge",name:"Quick Recharge",cost:2},
+      {key:"magnet",name:"Coin Magnet",cost:1}
+    ].forEach(power => {
+      const current = Math.min(5,Number(powers[power.key]) || 0);
+      const price = power.cost + current * 2;
+      addStoreItem(
+        power.name + " · Level " + current + "/5",
+        current >= 5 ? "MAX" : "Buy · 🔴 " + price,
+        current >= 5 || redCoins < price,
+        () => {
+          if (current >= 5 || redCoins < price) return;
+          redCoins -= price;
+          powers[power.key] = current + 1;
+          persist();
+          updateTitle();
+          openPowerStore();
+        }
+      );
+    });
+  }
+
+  function openBadges() {
+    modal.hidden = false;
+    modalTitle.textContent = "🏅 Achievements";
+    modalBalance.textContent = "Earned: " + earned.length + "/" + badges.length;
+    modalItems.replaceChildren();
+    badges.forEach(([id,name,description]) => {
+      addStoreItem(
+        (earned.includes(id) ? "🏅 " : "🔒 ") + name + " — " + description,
+        earned.includes(id) ? "Earned" : "Locked",
+        true,
+        () => {},
+        earned.includes(id) ? "#ffe06a" : "#c5d6e8"
+      );
+    });
+  }
+
+  // Connect the Play button directly to the level-start function.
+  playButton.onclick = startGame;
+  levelSelect.onchange = () => {
+    level = Math.min(unlocked,Number(levelSelect.value) || 1);
+    updateTitle();
+  };
+  returnButton.onclick = () => returnToTitle();
+  dashButton.onclick = useDash;
+  abilityButton.onclick = useAbility;
+  avatarStoreButton.onclick = openAvatarStore;
+  powerStoreButton.onclick = openPowerStore;
+  badgesButton.onclick = openBadges;
+  closeModal.onclick = () => { modal.hidden = true; };
+  exitButton.onclick = closeGame;
+
+  canvas.addEventListener("pointerdown",event => {
+    if (mode !== "game") return;
+    event.preventDefault();
+    beginSwing();
+  });
+  addEventListener("pointerup",releaseSwing);
+  addEventListener("keydown",onKeyDown);
+  addEventListener("keyup",onKeyUp);
+  addEventListener("resize",resize);
+
+  resize();
+  updateTitle();
+  updateControls();
+  raf = requestAnimationFrame(frame);
+})();
